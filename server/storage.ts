@@ -1,38 +1,42 @@
-import { type User, type InsertUser } from "@shared/schema";
-import { randomUUID } from "crypto";
+import type { ConnectionStatus, LogEntry } from "@shared/schema";
 
-// modify the interface with any CRUD methods
-// you might need
-
-export interface IStorage {
-  getUser(id: string): Promise<User | undefined>;
-  getUserByUsername(username: string): Promise<User | undefined>;
-  createUser(user: InsertUser): Promise<User>;
+export interface AppState {
+  captionHubToken: string;
+  flowId: string;
+  zoomToken: string;
+  pusherClient: any | null;
+  connectionStatus: ConnectionStatus;
+  log: LogEntry[];
+  seqCounter: number;
+  lastCaptionAt: string | null;
 }
 
-export class MemStorage implements IStorage {
-  private users: Map<string, User>;
+export const state: AppState = {
+  captionHubToken: "",
+  flowId: "",
+  zoomToken: "",
+  pusherClient: null,
+  connectionStatus: "disconnected",
+  log: [],
+  seqCounter: 0,
+  lastCaptionAt: null,
+};
 
-  constructor() {
-    this.users = new Map();
+export function addLogEntry(entry: LogEntry) {
+  state.log.unshift(entry);
+  if (state.log.length > 20) {
+    state.log = state.log.slice(0, 20);
   }
-
-  async getUser(id: string): Promise<User | undefined> {
-    return this.users.get(id);
-  }
-
-  async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username === username,
-    );
-  }
-
-  async createUser(insertUser: InsertUser): Promise<User> {
-    const id = randomUUID();
-    const user: User = { ...insertUser, id };
-    this.users.set(id, user);
-    return user;
-  }
+  state.lastCaptionAt = entry.timestamp;
 }
 
-export const storage = new MemStorage();
+export function resetState() {
+  state.captionHubToken = "";
+  state.flowId = "";
+  state.zoomToken = "";
+  state.pusherClient = null;
+  state.connectionStatus = "disconnected";
+  state.log = [];
+  state.seqCounter = 0;
+  state.lastCaptionAt = null;
+}
