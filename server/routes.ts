@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import { state, addLogEntry, resetState } from "./storage";
 import { connectSchema } from "@shared/schema";
 import { log } from "./index";
-import Pusher from "pusher-js";
+import { CaptionHub } from "@captionhub/captionhub-node-sdk";
 
 async function postWithBackoff(url: string, body: string, retries = 3): Promise<{ status: number | string; attempts: number }> {
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -49,7 +49,7 @@ function forwardToZoom(text: string) {
   const separator = state.zoomToken.includes("?") ? "&" : "?";
   const url = `${state.zoomToken}${separator}seq=${state.seqCounter}&lang=en-US`;
 
-  log(`Forwarding caption (seq=${state.seqCounter}): "${text.substring(0, 60)}..."`, "zoom");
+  log(`Forwarding caption (seq=${state.seqCounter}): "${text.substring(0, 80)}..."`, "zoom");
 
   postWithBackoff(url, text).then(({ status, attempts }) => {
     addLogEntry({
@@ -59,26 +59,6 @@ function forwardToZoom(text: string) {
       retries: attempts,
     });
   });
-}
-
-function extractCaptionText(data: any): string | null {
-  if (typeof data === "string") return data;
-  if (typeof data !== "object" || data === null) return null;
-
-  if (data.text) return String(data.text);
-  if (data.caption) return String(data.caption);
-  if (data.body) return String(data.body);
-  if (data.content) return String(data.content);
-  if (data.message) return String(data.message);
-  if (data.data && typeof data.data === "string") return data.data;
-  if (data.data && typeof data.data === "object") return extractCaptionText(data.data);
-
-  const values = Object.values(data);
-  for (const val of values) {
-    if (typeof val === "string" && val.length > 0) return val;
-  }
-
-  return JSON.stringify(data);
 }
 
 export async function registerRoutes(
@@ -97,9 +77,9 @@ export async function registerRoutes(
 
       const { captionHubToken, flowId, zoomToken } = parsed.data;
 
-      if (state.pusherClient) {
-        state.pusherClient.disconnect();
-        state.pusherClient = null;
+      if (state.timbraConnection) {
+        state.timbraConnection.disconnect();
+        state.timbraConnection = null;
       }
 
       state.captionHubToken = captionHubToken;
@@ -108,86 +88,36 @@ export async function registerRoutes(
       state.connectionStatus = "connecting";
       state.seqCounter = 0;
 
-      log(`Fetching Pusher connection details for flow ${flowId}`, "captionhub");
-
-      let pusherKey: string, channelName: string, cluster: string;
+      log(`Subscribing to CaptionHub flow ${flowId} via SDK`, "captionhub");
 
       try {
-        const apiRes = await fetch(
-          `https://api.captionhub.com/api/v1/timbra/${flowId}/connection`,
-          {
-            headers: { Authorization: captionHubToken },
-          }
-        );
+        const captionhub = new CaptionHub(captionHubToken);
 
-        if (!apiRes.ok) {
-          const errText = await apiRes.text();
-          state.connectionStatus = "error";
-          return res.status(apiRes.status).json({
-            message: `CaptionHub API error (${apiRes.status}): ${errText}`
-          });
-        }
+        const connection = await captionhub.timbra.subscribe({
+          flowId,
+          onCaption: (event) => {
+            log(`Received ${event.captions.length} caption(s)`, "captionhub");
+            for (const caption of event.captions) {
+              if (caption.text) {
+                forwardToZoom(caption.text);
+              }
+            }
+          },
+          onHeartbeat: (event) => {
+            log(`Heartbeat: ${event.timestamp}`, "captionhub");
+          },
+        });
 
-        const connectionData = await apiRes.json() as any;
-        pusherKey = connectionData.pusher?.key;
-        channelName = connectionData.pusher?.channel_name;
-        cluster = connectionData.pusher?.cluster;
+        state.timbraConnection = connection;
+        state.connectionStatus = "connected";
 
-        if (!pusherKey || !channelName || !cluster) {
-          state.connectionStatus = "error";
-          return res.status(500).json({
-            message: "Missing Pusher connection details from CaptionHub response"
-          });
-        }
-
-        log(`Pusher details: key=${pusherKey}, channel=${channelName}, cluster=${cluster}`, "captionhub");
+        log("Successfully subscribed to CaptionHub flow", "captionhub");
+        return res.json({ message: "Connected successfully" });
       } catch (err: any) {
         state.connectionStatus = "error";
-        return res.status(500).json({
-          message: `Failed to connect to CaptionHub API: ${err.message}`
-        });
-      }
-
-      try {
-        const pusherClient = new Pusher(pusherKey, {
-          cluster,
-          enabledTransports: ["ws"],
-        });
-
-        const channel = pusherClient.subscribe(channelName);
-
-        channel.bind_global((eventName: string, data: any) => {
-          if (eventName.startsWith("pusher:")) return;
-
-          log(`Received event: ${eventName}`, "pusher");
-          const text = extractCaptionText(data);
-          if (text) {
-            forwardToZoom(text);
-          }
-        });
-
-        pusherClient.connection.bind("connected", () => {
-          log("Pusher connected", "pusher");
-          state.connectionStatus = "connected";
-        });
-
-        pusherClient.connection.bind("disconnected", () => {
-          log("Pusher disconnected", "pusher");
-        });
-
-        pusherClient.connection.bind("error", (err: any) => {
-          log(`Pusher error: ${JSON.stringify(err)}`, "pusher");
-          state.connectionStatus = "error";
-        });
-
-        state.pusherClient = pusherClient;
-
-        return res.json({ message: "Connection initiated" });
-      } catch (err: any) {
-        state.connectionStatus = "error";
-        return res.status(500).json({
-          message: `Failed to initialize Pusher: ${err.message}`
-        });
+        const message = err.message || "Failed to connect to CaptionHub";
+        log(`Connection error: ${message}`, "captionhub");
+        return res.status(500).json({ message });
       }
     } catch (err: any) {
       state.connectionStatus = "error";
@@ -196,9 +126,9 @@ export async function registerRoutes(
   });
 
   app.post("/api/disconnect", (_req, res) => {
-    if (state.pusherClient) {
-      state.pusherClient.disconnect();
-      log("Disconnected from Pusher", "pusher");
+    if (state.timbraConnection) {
+      state.timbraConnection.disconnect();
+      log("Disconnected from CaptionHub", "captionhub");
     }
     resetState();
     return res.json({ message: "Disconnected" });

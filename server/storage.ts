@@ -4,7 +4,7 @@ export interface AppState {
   captionHubToken: string;
   flowId: string;
   zoomToken: string;
-  pusherClient: any | null;
+  timbraConnection: any | null;
   connectionStatus: ConnectionStatus;
   log: LogEntry[];
   seqCounter: number;
@@ -15,7 +15,7 @@ export const state: AppState = {
   captionHubToken: "",
   flowId: "",
   zoomToken: "",
-  pusherClient: null,
+  timbraConnection: null,
   connectionStatus: "disconnected",
   log: [],
   seqCounter: 0,
@@ -34,7 +34,7 @@ export function resetState() {
   state.captionHubToken = "";
   state.flowId = "";
   state.zoomToken = "";
-  state.pusherClient = null;
+  state.timbraConnection = null;
   state.connectionStatus = "disconnected";
   state.log = [];
   state.seqCounter = 0;
