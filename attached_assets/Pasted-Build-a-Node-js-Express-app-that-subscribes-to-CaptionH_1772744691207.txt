@@ -1,0 +1,96 @@
+Build a Node.js Express app that subscribes to CaptionHub captions via a Pusher WebSocket connection and forwards them in real time to Zoom's third-party closed captioning REST API.
+
+## How it works
+1. The operator pastes in their CaptionHub API token, a CaptionHub Flow ID, and the Zoom caption API token via a web UI
+2. The app calls the CaptionHub REST API to get Pusher connection details for that flow
+3. The app subscribes to the Pusher channel and listens for caption events
+4. Each caption received is immediately POSTed to Zoom's `/closedcaption` URL as plain text
+5. Failed Zoom POSTs are retried with exponential backoff
+
+---
+
+## Dependencies
+- `express` — HTTP server and UI
+- `pusher-js` — WebSocket client for subscribing to CaptionHub's Pusher channel
+- `node-fetch` — for the CaptionHub REST call and Zoom POST requests
+
+Install all three via npm.
+
+---
+
+## In-memory state
+Store the following in memory (no database needed):
+- `captionHubToken` — the operator's CaptionHub API token
+- `flowId` — the CaptionHub flow ID
+- `zoomToken` — the full Zoom closedcaption URL
+- `pusherClient` — the active Pusher client instance (if connected)
+- `connectionStatus` — one of: `disconnected`, `connecting`, `connected`, `error`
+- `log` — array of last 20 caption events (capped)
+- `seqCounter` — integer, increments with each caption sent to Zoom
+
+---
+
+## Routes
+
+### `GET /`
+A clean, minimal web UI (plain HTML/CSS, no framework) with:
+- Three input fields:
+  - CaptionHub API token
+  - CaptionHub Flow ID
+  - Zoom API token (the full closedcaption URL)
+- A "Connect" button that POSTs to `/connect`
+- A "Disconnect" button that POSTs to `/disconnect`
+- A status indicator showing `connectionStatus` (poll `GET /status` every 3 seconds to keep it live)
+- A log panel showing the last 20 caption events (timestamp, caption text, Zoom response status), also updated by polling `/status`
+
+### `POST /connect`
+Accepts JSON body `{ "captionHubToken": "...", "flowId": "...", "zoomToken": "..." }`.
+
+1. Validate all three fields are present
+2. Validate the Zoom token contains `closedcaption` and `id=`
+3. Call the CaptionHub API to get Pusher connection details:
+   ```
+   GET https://api.captionhub.com/api/v1/timbra/{flowId}/connection
+   Authorization: {captionHubToken}
+   ```
+4. From the response extract `pusher.key`, `pusher.channel_name`, `pusher.cluster`
+5. Create a Pusher client using those details and subscribe to the channel
+6. Bind to all incoming events on the channel — when a caption event fires, extract the caption text and call `forwardToZoom(text)`
+7. Set `connectionStatus` to `connected`
+8. Return `200 OK`
+
+### `POST /disconnect`
+Unsubscribes and disconnects the Pusher client, resets `connectionStatus` to `disconnected`. Returns `200 OK`.
+
+### `GET /status`
+Returns JSON:
+```json
+{
+  "connectionStatus": "connected",
+  "lastCaptionAt": "2024-01-01T10:00:00.000Z",
+  "recentLog": [ ... ]
+}
+```
+
+---
+
+## Caption forwarding — `forwardToZoom(text)`
+1. Increment `seqCounter`
+2. Build the Zoom POST URL by appending `&seq={seqCounter}&lang=en-US` to the stored Zoom token URL
+3. POST the caption text to that URL with `Content-Type: text/plain; charset=utf-8`
+4. On failure, retry using `postWithBackoff(url, text, retries=3)`
+5. Append the result to `log` (cap at 20 entries): `{ timestamp, text, status, retries }`
+
+## Retry logic — `postWithBackoff(url, body, retries=3)`
+- On each failure, wait `100 * 2^attempt` milliseconds before retrying
+- Add jitter: randomise the wait by ±50ms
+- Log each retry attempt with attempt number and delay
+- If all retries fail, log the error with status `failed` and move on
+
+---
+
+## Notes
+- The Zoom token is session-scoped — remind the user in the UI that they need to paste a fresh one at the start of each Zoom meeting
+- The Pusher subscription should reconnect automatically if the connection drops (Pusher-js handles this by default — make sure `enabledTransports: ['ws']` is set)
+- You do not need to parse or interpret the caption event structure deeply — just extract whatever string field contains the caption text from the Pusher event payload and forward it
+- This is an internal ops tool — keep the UI clean and functional, not decorative
