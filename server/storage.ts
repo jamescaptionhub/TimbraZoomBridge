@@ -4,6 +4,7 @@ export interface AppState {
   captionHubToken: string;
   flowId: string;
   zoomToken: string;
+  language: string;
   timbraConnection: any | null;
   connectionStatus: ConnectionStatus;
   log: LogEntry[];
@@ -15,6 +16,7 @@ export const state: AppState = {
   captionHubToken: "",
   flowId: "",
   zoomToken: "",
+  language: "",
   timbraConnection: null,
   connectionStatus: "disconnected",
   log: [],
@@ -34,6 +36,7 @@ export function resetState() {
   state.captionHubToken = "";
   state.flowId = "";
   state.zoomToken = "";
+  state.language = "";
   state.timbraConnection = null;
   state.connectionStatus = "disconnected";
   state.log = [];

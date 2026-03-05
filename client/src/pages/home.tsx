@@ -3,11 +3,12 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { connectSchema, type ConnectRequest, type StatusResponse, type ConfigResponse, type LogEntry } from "@shared/schema";
+import { connectSchema, CAPTION_LANGUAGES, type ConnectRequest, type StatusResponse, type ConfigResponse, type LogEntry } from "@shared/schema";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -126,6 +127,7 @@ export default function Home() {
       captionHubToken: "",
       flowId: "",
       zoomToken: "",
+      language: "",
     },
   });
 
@@ -141,7 +143,8 @@ export default function Home() {
 
   const connectMutation = useMutation({
     mutationFn: async (data: ConnectRequest) => {
-      const payload: any = { flowId: data.flowId, zoomToken: data.zoomToken };
+      const lang = data.language === "all" ? "" : (data.language || "");
+      const payload: any = { flowId: data.flowId, zoomToken: data.zoomToken, language: lang };
       if (data.captionHubToken) {
         payload.captionHubToken = data.captionHubToken;
       }
@@ -244,6 +247,30 @@ export default function Home() {
                               {...field}
                             />
                           </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="language"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Caption Language</FormLabel>
+                          <Select onValueChange={field.onChange} defaultValue={field.value}>
+                            <FormControl>
+                              <SelectTrigger data-testid="select-language">
+                                <SelectValue placeholder="All Languages" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              {CAPTION_LANGUAGES.map((lang) => (
+                                <SelectItem key={lang.value || "all"} value={lang.value || "all"} data-testid={`select-language-option-${lang.value || "all"}`}>
+                                  {lang.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                           <FormMessage />
                         </FormItem>
                       )}

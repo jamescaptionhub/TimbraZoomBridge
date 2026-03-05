@@ -44,10 +44,20 @@ async function postWithBackoff(url: string, body: string, retries = 3): Promise<
   return { status: "failed", attempts: retries };
 }
 
-function forwardToZoom(text: string) {
+const LANG_TO_ZOOM: Record<string, string> = {
+  "EN": "en-US", "ES": "es-ES", "FR": "fr-FR", "DE": "de-DE", "IT": "it-IT",
+  "PT": "pt-PT", "NL": "nl-NL", "PL": "pl-PL", "RU": "ru-RU", "JA": "ja-JP",
+  "KO": "ko-KR", "ZH": "zh-CN", "AR": "ar-SA", "HI": "hi-IN", "TR": "tr-TR",
+  "SV": "sv-SE", "DA": "da-DK", "NO": "no-NO", "FI": "fi-FI", "CS": "cs-CZ",
+  "HU": "hu-HU", "RO": "ro-RO", "UK": "uk-UA", "HE": "he-IL", "TH": "th-TH",
+  "VI": "vi-VN", "ID": "id-ID", "MS": "ms-MY",
+};
+
+function forwardToZoom(text: string, captionLang?: string) {
   state.seqCounter++;
+  const zoomLang = captionLang ? (LANG_TO_ZOOM[captionLang.toUpperCase()] || "en-US") : "en-US";
   const separator = state.zoomToken.includes("?") ? "&" : "?";
-  const url = `${state.zoomToken}${separator}seq=${state.seqCounter}&lang=en-US`;
+  const url = `${state.zoomToken}${separator}seq=${state.seqCounter}&lang=${zoomLang}`;
 
   log(`Forwarding caption (seq=${state.seqCounter}): "${text.substring(0, 80)}..."`, "zoom");
 
@@ -74,7 +84,7 @@ export async function registerRoutes(
 
   app.post("/api/connect", async (req, res) => {
     try {
-      const { flowId, zoomToken, captionHubToken } = req.body;
+      const { flowId, zoomToken, captionHubToken, language } = req.body;
 
       const resolvedToken = captionHubToken || process.env.CAPTIONHUB_API_KEY;
       if (!resolvedToken) {
@@ -92,13 +102,16 @@ export async function registerRoutes(
         state.timbraConnection = null;
       }
 
+      const selectedLanguage = (language || "").toUpperCase();
+
       state.captionHubToken = resolvedToken;
       state.flowId = flowId;
       state.zoomToken = zoomToken;
+      state.language = selectedLanguage;
       state.connectionStatus = "connecting";
       state.seqCounter = 0;
 
-      log(`Subscribing to CaptionHub flow ${flowId} via SDK`, "captionhub");
+      log(`Subscribing to CaptionHub flow ${flowId} via SDK${selectedLanguage ? ` (language: ${selectedLanguage})` : " (all languages)"}`, "captionhub");
 
       try {
         const captionhub = new CaptionHub(resolvedToken);
@@ -108,9 +121,12 @@ export async function registerRoutes(
           onCaption: (event) => {
             log(`Received ${event.captions.length} caption(s)`, "captionhub");
             for (const caption of event.captions) {
-              if (caption.text) {
-                forwardToZoom(caption.text);
+              if (!caption.text) continue;
+              if (state.language && caption.language.toUpperCase() !== state.language) {
+                log(`Skipping caption in ${caption.language} (filtering for ${state.language})`, "captionhub");
+                continue;
               }
+              forwardToZoom(caption.text, caption.language);
             }
           },
           onHeartbeat: (event) => {
@@ -149,6 +165,7 @@ export async function registerRoutes(
       connectionStatus: state.connectionStatus,
       lastCaptionAt: state.lastCaptionAt,
       recentLog: state.log,
+      language: state.language,
     });
   });
 
