@@ -66,23 +66,33 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
 
+  app.get("/api/config", (_req, res) => {
+    return res.json({
+      hasCaptionHubKey: !!process.env.CAPTIONHUB_API_KEY,
+    });
+  });
+
   app.post("/api/connect", async (req, res) => {
     try {
-      const parsed = connectSchema.safeParse(req.body);
-      if (!parsed.success) {
-        return res.status(400).json({
-          message: parsed.error.errors.map(e => e.message).join(", ")
-        });
-      }
+      const { flowId, zoomToken, captionHubToken } = req.body;
 
-      const { captionHubToken, flowId, zoomToken } = parsed.data;
+      const resolvedToken = captionHubToken || process.env.CAPTIONHUB_API_KEY;
+      if (!resolvedToken) {
+        return res.status(400).json({ message: "CaptionHub API token is required" });
+      }
+      if (!flowId) {
+        return res.status(400).json({ message: "CaptionHub Flow ID is required" });
+      }
+      if (!zoomToken || !zoomToken.includes("closedcaption") || !zoomToken.includes("id=")) {
+        return res.status(400).json({ message: "Valid Zoom closedcaption URL is required (must contain 'closedcaption' and 'id=')" });
+      }
 
       if (state.timbraConnection) {
         state.timbraConnection.disconnect();
         state.timbraConnection = null;
       }
 
-      state.captionHubToken = captionHubToken;
+      state.captionHubToken = resolvedToken;
       state.flowId = flowId;
       state.zoomToken = zoomToken;
       state.connectionStatus = "connecting";
@@ -91,7 +101,7 @@ export async function registerRoutes(
       log(`Subscribing to CaptionHub flow ${flowId} via SDK`, "captionhub");
 
       try {
-        const captionhub = new CaptionHub(captionHubToken);
+        const captionhub = new CaptionHub(resolvedToken);
 
         const connection = await captionhub.timbra.subscribe({
           flowId,

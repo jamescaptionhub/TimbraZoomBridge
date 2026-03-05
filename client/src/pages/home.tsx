@@ -1,13 +1,12 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { connectSchema, type ConnectRequest, type StatusResponse, type LogEntry } from "@shared/schema";
+import { connectSchema, type ConnectRequest, type StatusResponse, type ConfigResponse, type LogEntry } from "@shared/schema";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
@@ -22,6 +21,7 @@ import {
   RefreshCw,
   CheckCircle2,
   XCircle,
+  KeyRound,
 } from "lucide-react";
 import {
   Form,
@@ -114,6 +114,12 @@ export default function Home() {
   const { toast } = useToast();
   const [isFormVisible, setIsFormVisible] = useState(true);
 
+  const { data: configData } = useQuery<ConfigResponse>({
+    queryKey: ["/api/config"],
+  });
+
+  const hasCaptionHubKey = configData?.hasCaptionHubKey ?? false;
+
   const form = useForm<ConnectRequest>({
     resolver: zodResolver(connectSchema),
     defaultValues: {
@@ -135,7 +141,11 @@ export default function Home() {
 
   const connectMutation = useMutation({
     mutationFn: async (data: ConnectRequest) => {
-      const res = await apiRequest("POST", "/api/connect", data);
+      const payload: any = { flowId: data.flowId, zoomToken: data.zoomToken };
+      if (data.captionHubToken) {
+        payload.captionHubToken = data.captionHubToken;
+      }
+      const res = await apiRequest("POST", "/api/connect", payload);
       return res.json();
     },
     onSuccess: () => {
@@ -196,24 +206,31 @@ export default function Home() {
               {isFormVisible && !isConnected ? (
                 <Form {...form}>
                   <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-                    <FormField
-                      control={form.control}
-                      name="captionHubToken"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>CaptionHub API Token</FormLabel>
-                          <FormControl>
-                            <Input
-                              type="password"
-                              placeholder="Enter your CaptionHub API token"
-                              data-testid="input-captionhub-token"
-                              {...field}
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
+                    {hasCaptionHubKey ? (
+                      <div className="flex items-center gap-2 p-3 rounded-md bg-emerald-50 dark:bg-emerald-900/20 text-emerald-800 dark:text-emerald-300 text-sm" data-testid="text-api-key-stored">
+                        <KeyRound className="w-4 h-4 flex-shrink-0" />
+                        <span>CaptionHub API key is configured on the server</span>
+                      </div>
+                    ) : (
+                      <FormField
+                        control={form.control}
+                        name="captionHubToken"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>CaptionHub API Token</FormLabel>
+                            <FormControl>
+                              <Input
+                                type="password"
+                                placeholder="Enter your CaptionHub API token"
+                                data-testid="input-captionhub-token"
+                                {...field}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    )}
                     <FormField
                       control={form.control}
                       name="flowId"
@@ -222,7 +239,7 @@ export default function Home() {
                           <FormLabel>CaptionHub Flow ID</FormLabel>
                           <FormControl>
                             <Input
-                              placeholder="e.g. abc123"
+                              placeholder="e.g. 8ccea7c864e5"
                               data-testid="input-flow-id"
                               {...field}
                             />

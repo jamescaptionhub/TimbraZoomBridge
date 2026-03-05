@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const connectSchema = z.object({
-  captionHubToken: z.string().min(1, "CaptionHub API token is required"),
+  captionHubToken: z.string().optional().default(""),
   flowId: z.string().min(1, "CaptionHub Flow ID is required"),
   zoomToken: z.string().min(1, "Zoom API token is required")
     .refine(val => val.includes("closedcaption") && val.includes("id="), {
@@ -24,4 +24,8 @@ export interface StatusResponse {
   connectionStatus: ConnectionStatus;
   lastCaptionAt: string | null;
   recentLog: LogEntry[];
+}
+
+export interface ConfigResponse {
+  hasCaptionHubKey: boolean;
 }
